@@ -1,13 +1,24 @@
-# aws-route53-wipe-hosted-zone
+# Delete AWS Route53 Hosted Zones
 
-Delete an Amazon Route 53 Hosted Zone with all contained Record Sets
+Bulk delete Route 53 hosted zone with all contained Record Sets
 
-To wipe out the Route 53 entries for "example.com", you might use:
+### usage :
 
-    aws-route53-wipe-hosted-zone example.com
+1. Delete records for all domain in a file
+```
+aws-route-delete -f domain_list.txt         
+````
 
-WARNING! This is a simple example script with no error checking and no
-prompting before doing dangerous tasks. Everything this tool tries to
-do is dangerous if you give it a domain name that you don't want to
-wipe out.
+2. Delete domain/s as parameter
+```
+aws-route-delete -p example.com example2.com
+```
 
+#### for verbose output
+```
+aws-route-delete -vf domain_list.txt
+aws-route-delete -vp example.com example2.com 
+```
+
+
+[originally written at](https://sookocheff.com/post/bash/parsing-bash-script-arguments-with-shopts/)

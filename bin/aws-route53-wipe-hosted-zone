@@ -4,42 +4,128 @@
 #
 # aws-route53-wipe-hosted-zone - Delete a Route 53 hosted zone with all contents
 #
-set -e
-VERBOSE=true
+#set -e
 
-for domain_to_delete in "$@"; do
+
+# while getopts u:a:l: option
+# do
+# case "${option}"
+# in
+# u) USER=${OPTARG};;
+# a) AGE=${OPTARG};;
+# l) LOCATION=${OPTARG};;
+# esac
+# done
+
+
+# echo "Given user name is: "$USER
+# echo "Given age is: "$DATE
+# echo "Given location is: "$LOCATION
+
+
+OPTIND=1
+VERBOSE=false
+
+domain_list=""
+domain_param=false;
+file_param='';
+file_param_output='';
+
+show_help() {
+  echo "Usage:"
+  echo "  aws-route53-wipe-hosted-zone -f domain_list.txt"
+  echo "  aws-route53-wipe-hosted-zone -p example.com example2.com"
+  echo "  aws-route53-wipe-hosted-zone -vf domain_list.txt        for verbose output"
+  echo "  aws-route53-wipe-hosted-zone -vp example.com example2.com        for verbose output"
+  exit 1
+}
+
+if [ $# -eq 0 ]; then
+  show_help
+fi
+
+
+while getopts "h?pvf:" opt; do
+  case ${opt} in
+    h|\?)
+      show_help
+      ;;
+    p)
+      domain_param=true
+      ;;
+    f)
+      file_param=${OPTARG}
+      ;;
+    v)
+      VERBOSE=true
+      ;;
+  esac
+done
+
+
+
+shift $((OPTIND -1))
+if [ $domain_param ]; then
+  PARAMS=$@;
+  domain_list="${OPTARG} ${PARAMS}"
+fi
+
+if [ -e "$file_param" ]; then
+domain_list=''
+  while IFS= read -r line; do
+    domain_list+=" ${line}"
+  done < $file_param
+else 
+  echo "${file_param} File does not exist"
+  exit 1
+fi
+
+for domain_to_delete in ${domain_list}; do
   $VERBOSE && echo "DESTROYING: $domain_to_delete in Route 53"
-
-  hosted_zone_id=$(
+  hosted_zone_ids=$(
     aws route53 list-hosted-zones \
       --output text \
       --query 'HostedZones[?Name==`'$domain_to_delete'.`].Id'
   )
-  $VERBOSE &&
-    echo hosted_zone_id=${hosted_zone_id:?Unable to find: $domain_to_delete}
+  
+  if [ -z "${hosted_zone_ids}" ]; then
+    file_param_output+="${domain_to_delete} ---- No hosted zone found \n"
+    $VERBOSE && echo "No hosted-zones for : ${domain_to_delete}"
+    
+    continue
+  fi
 
-  aws route53 list-resource-record-sets \
-    --hosted-zone-id $hosted_zone_id |
-  jq -c '.ResourceRecordSets[]' |
-  while read -r resourcerecordset; do
-    read -r name type <<<$(jq -r '.Name,.Type' <<<"$resourcerecordset")
-    if [ $type == "NS" -o $type == "SOA" ]; then
-      $VERBOSE && echo "SKIPPING: $type $name"
-    else
-      change_id=$(aws route53 change-resource-record-sets \
-        --hosted-zone-id $hosted_zone_id \
-        --change-batch '{"Changes":[{"Action":"DELETE","ResourceRecordSet":
-            '"$resourcerecordset"'
-          }]}' \
-        --output text \
-        --query 'ChangeInfo.Id')
-      $VERBOSE && echo "DELETING: $type $name $change_id"
-    fi
-  done
-
-  change_id=$(aws route53 delete-hosted-zone \
+  for hosted_zone_id in $hosted_zone_ids; do
+    aws route53 list-resource-record-sets \
+    --hosted-zone-id $hosted_zone_id | jq -c '.ResourceRecordSets[]' |
+    
+    while read -r resourcerecordset; do
+      read -r name <<<$(jq -r '.Name' <<<"$resourcerecordset")
+      read -r type <<<$(jq -r '.Type' <<<"$resourcerecordset")
+      if [ $type == "NS" -o $type == "SOA" ]; then
+        $VERBOSE && echo "SKIPPING: $type $name"
+      else
+        change_id=$(aws route53 change-resource-record-sets \
+              --hosted-zone-id $hosted_zone_id \
+              --change-batch '{"Changes":[{"Action":"DELETE","ResourceRecordSet":
+                  '"$resourcerecordset"'
+                }]}' \
+              --output text \
+              --query 'ChangeInfo.Id')
+        $VERBOSE && echo "DELETING: $type $name $change_id"
+      fi    
+    done #while record_set
+    
+    change_id=$(aws route53 delete-hosted-zone \
     --id $hosted_zone_id \
     --output text \
     --query 'ChangeInfo.Id')
-  $VERBOSE && echo "DELETING: hosted zone for $domain_to_delete $change_id"
-done
+    $VERBOSE && echo "DELETED: hosted zone for $domain_to_delete $change_id"
+    file_param_output+="${domain_to_delete} ---- DELETED: hosted zone for ${domain_to_delete} ${change_id}  \n"
+  done # for hosted_zone_ids
+  
+done #domain_list
+
+if [ -e "$file_param" ]; then 
+  printf "${file_param_output}" > domain_list_response.txt 
+fi
